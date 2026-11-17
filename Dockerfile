@@ -13,6 +13,7 @@ RUN pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requir
 
 COPY pyproject.toml README.md ./
 COPY src ./src
+COPY eval ./eval
 RUN pip install --no-deps .
 
 # Run as a non-root user.

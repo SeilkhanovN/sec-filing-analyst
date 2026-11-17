@@ -12,12 +12,12 @@ Overnight build log for SEC Filing Analyst. Newest state at the top of each sect
 | 4 | Retrieval and answers | PASSED (real Gemini: cited answer verified; unanswerable -> "Not found in the filings") | 2026-11-18 |
 | 5 | Agent | PASSED (mock-LLM tests pass; real Gemini run used both tools; screener unreachable, see notes) | 2026-11-18 |
 | 6 | Evaluation | PASSED (retrieval hit 72.0%, answer correctness 80.0% answerable + 3/3 refusals, citation validity 100% 23/23) | 2026-11-18 |
-| 7 | Docs | not started | |
+| 7 | Docs | PASSED (README commands run: pytest, check-config, ingest, count, ask --ticker, agent, eval; pip dry-run of requirements) | 2026-11-18 |
 | 8 | Web app | not started | |
 
 ## Next step
 
-Milestone 7: README, docs/EXPLAINED.md, STATUS.md; verify README commands.
+Milestone 8: FastAPI backend (/health, /filings, /ask) + static page, tests, server check.
 
 ## Evaluation (M6 baseline)
 
