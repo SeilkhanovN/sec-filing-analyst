@@ -112,6 +112,15 @@ def split_sections(text: str) -> list[Section]:
         else:
             segments[-1][1].append(line)
 
+    # The last table-of-contents entry (often "Item 16") is followed by front matter such as
+    # the forward-looking statements notice, then the real "Item 1". A segment whose next
+    # heading goes *backwards* in item order is therefore front matter, not that item.
+    rank = {item: i for i, item in enumerate(SECTION_TITLES)}
+    for i in range(1, len(segments) - 1):
+        item_id, next_id = segments[i][0], segments[i + 1][0]
+        if rank[next_id] < rank[item_id]:
+            segments[i] = ("cover", segments[i][1])
+
     order: list[str] = []
     bodies: dict[str, list[str]] = {}
     for item_id, lines in segments:

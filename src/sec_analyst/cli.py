@@ -1,22 +1,107 @@
-"""Command-line entry point: python -m sec_analyst.cli <command>."""
+"""Command-line entry point: python -m sec_analyst.cli <command> --help."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import sys
 
-from .config import load_settings
+from .citations import format_citation
+from .config import COMPANIES, load_settings
+
+
+def _print_answer(answer, show_steps: bool = False) -> None:
+    if show_steps:
+        for s in answer.steps:
+            if s["type"] == "tool":
+                print(f"  step {s['step']}: {s['tool']}({json.dumps(s['args'])}) -> {s['summary'][:160]}")
+            else:
+                print(f"  step {s['step']}: final answer")
+    print("\nANSWER:\n" + answer.answer)
+    if answer.citations:
+        print("\nCITATIONS:")
+        for i, c in enumerate(answer.citations, 1):
+            print(format_citation(i, c))
+    if answer.error:
+        print(f"\nNOTE: {answer.error}")
+    if answer.usage:
+        print(f"\nusage: {answer.usage}")
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="sec_analyst", description=__doc__)
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # Windows consoles
+    parser = argparse.ArgumentParser(prog="python -m sec_analyst.cli", description="SEC Filing Analyst")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("check-config", help="show which settings are configured (never shows secrets)")
+
+    p_ingest = sub.add_parser("ingest", help="download, chunk, embed and index the latest 10-Ks")
+    p_ingest.add_argument("--tickers", nargs="*", default=list(COMPANIES), help="default: all five companies")
+
+    sub.add_parser("count", help="print the number of indexed chunks per company")
+
+    p_ask = sub.add_parser("ask", help="answer a question with RAG (one LLM call)")
+    p_ask.add_argument("question")
+    p_ask.add_argument("--ticker", default=None)
+    p_ask.add_argument("--k", type=int, default=None, help="number of passages to retrieve")
+
+    p_agent = sub.add_parser("agent", help="answer a question with the tool-using agent")
+    p_agent.add_argument("question")
+    p_agent.add_argument("--ticker", default=None)
+    p_agent.add_argument("--max-steps", type=int, default=6)
+
+    sub.add_parser("list-models", help="list Gemini models that support generateContent (no generation call)")
+
     args = parser.parse_args(argv)
+    settings = load_settings()
 
     if args.command == "check-config":
-        print(json.dumps(load_settings().describe(), indent=2))
-    return 0
+        print(json.dumps(settings.describe(), indent=2))
+        return 0
+
+    from . import pipeline  # heavy imports only when needed
+
+    if args.command == "ingest":
+        from .edgar import EdgarClient
+        from .ingest import ingest
+
+        edgar = EdgarClient(settings.edgar_user_agent, settings.data_dir)
+        store = pipeline.build_store(settings)
+        counts = ingest([t.upper() for t in args.tickers], edgar, pipeline.build_embedder(settings), store, settings.data_dir)
+        print(json.dumps(counts, indent=2))
+        return 0
+
+    if args.command == "count":
+        counts = pipeline.build_store(settings).count_by_ticker()
+        for ticker in COMPANIES:
+            print(f"{ticker}: {counts.get(ticker, 0)} chunks")
+        print(f"total: {sum(counts.values())} chunks")
+        return 0 if counts else 1
+
+    if args.command == "list-models":
+        from google import genai
+
+        client = genai.Client(api_key=settings.gemini_api_key)
+        for m in client.models.list():
+            if "generateContent" in (m.supported_actions or []):
+                print(m.name)
+        return 0
+
+    from .llm import make_llm_client
+
+    retriever = pipeline.build_retriever(settings)
+    llm = make_llm_client(settings)
+    print(f"[model: {llm.model}]")
+    if args.command == "ask":
+        from .rag import answer_question
+
+        _print_answer(answer_question(args.question, retriever, llm, k=args.k, ticker=args.ticker))
+        return 0
+    if args.command == "agent":
+        agent = pipeline.build_agent(settings, retriever, llm, max_steps=args.max_steps)
+        _print_answer(agent.run(args.question, ticker=args.ticker), show_steps=True)
+        return 0
+    return 1
 
 
 if __name__ == "__main__":
