@@ -11,13 +11,29 @@ Overnight build log for SEC Filing Analyst. Newest state at the top of each sect
 | 3 | Ingestion | PASSED (AAPL 203, MSFT 276, NVDA 284, TSLA 343, AMZN 244 chunks) | 2026-11-18 |
 | 4 | Retrieval and answers | PASSED (real Gemini: cited answer verified; unanswerable -> "Not found in the filings") | 2026-11-18 |
 | 5 | Agent | PASSED (mock-LLM tests pass; real Gemini run used both tools; screener unreachable, see notes) | 2026-11-18 |
-| 6 | Evaluation | not started | |
+| 6 | Evaluation | PASSED (retrieval hit 72.0%, answer correctness 80.0% answerable + 3/3 refusals, citation validity 100% 23/23) | 2026-11-18 |
 | 7 | Docs | not started | |
 | 8 | Web app | not started | |
 
 ## Next step
 
-Milestone 6: run eval/run_eval.py and write eval/results.md.
+Milestone 7: README, docs/EXPLAINED.md, STATUS.md; verify README commands.
+
+## Evaluation (M6 baseline)
+
+`python eval/run_eval.py` with `gemini-3.5-flash-lite`, top-k 5, 28 questions (25 answerable,
+3 unanswerable). First run: 28 live LLM calls, 0 errors (later re-runs read the cache).
+
+| Metric | Value |
+|---|---|
+| Retrieval hit rate (source chunk in top-5) | 72.0% (18/25) |
+| Answer correctness, answerable | 80.0% (20/25) |
+| Unanswerable correctly refused | 3/3 |
+| Citation validity | 100% (23/23) |
+
+All 5 wrong answers were "not found" after a retrieval miss (aapl-1, aapl-2, aapl-5, nvda-1,
+amzn-5): the model refused rather than guessed. Two retrieval misses still got correct
+answers from another chunk with the same fact (nvda-3, tsla-5).
 
 ## Filings indexed (latest 10-K as of 2026-11-18)
 
@@ -81,6 +97,14 @@ Milestone 6: run eval/run_eval.py and write eval/results.md.
   the run (the author's screener service was not running or is not reachable from this
   machine). The agent handled it as designed and said live data was unavailable. The
   endpoint path (`/api/screener/{ticker}`) is an assumption and may need `SCREENER_PATH`.
+- **Default model changed to `gemini-3.5-flash-lite` (M6):** it is a current Flash-class
+  (Flash-Lite) model, on the free tier, supports function calling, and is the model the agent
+  run and the whole evaluation were verified with. `gemini-3.8-flash` (verified in M4) is
+  limited to 20 free requests/day, less than one 28-question eval, and returned many 503
+  "high demand" errors during the run. Either can be chosen with `LLM_MODEL`.
+- **Eval questions** were written from facts located with `eval/search_chunks.py`; a script
+  confirmed that every expected fact occurs verbatim (after normalisation) in its source
+  chunk. `also_in` lists overlapping chunks that contain the same fact.
 - RAG's `answer_question` raises `LLMError` (the eval needs to tell errors from "not found");
   the CLI catches it and prints a clean error. Retries are logged as warnings.
 

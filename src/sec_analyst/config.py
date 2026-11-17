@@ -22,7 +22,7 @@ COMPANIES: dict[str, dict[str, str]] = {
     "AMZN": {"cik": "1018724", "name": "Amazon.com, Inc."},
 }
 
-DEFAULT_LLM_MODEL = "gemini-3.8-flash"
+DEFAULT_LLM_MODEL = "gemini-3.5-flash-lite"
 DEFAULT_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 
 
