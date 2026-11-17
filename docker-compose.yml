@@ -1,0 +1,8 @@
+services:
+  # Default service: the CLI image. (Milestone 8 switches the default to the web app.)
+  analyst:
+    build: .
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./chroma_db:/app/chroma_db
