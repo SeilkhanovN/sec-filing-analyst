@@ -10,14 +10,14 @@ Overnight build log for SEC Filing Analyst. Newest state at the top of each sect
 | 2 | Tests first | PASSED | 2026-11-18 |
 | 3 | Ingestion | PASSED (AAPL 203, MSFT 276, NVDA 284, TSLA 343, AMZN 244 chunks) | 2026-11-18 |
 | 4 | Retrieval and answers | PASSED (real Gemini: cited answer verified; unanswerable -> "Not found in the filings") | 2026-11-18 |
-| 5 | Agent | not started | |
+| 5 | Agent | PASSED (mock-LLM tests pass; real Gemini run used both tools; screener unreachable, see notes) | 2026-11-18 |
 | 6 | Evaluation | not started | |
 | 7 | Docs | not started | |
 | 8 | Web app | not started | |
 
 ## Next step
 
-Milestone 5: one real agent run with Gemini using both tools.
+Milestone 6: run eval/run_eval.py and write eval/results.md.
 
 ## Filings indexed (latest 10-K as of 2026-11-18)
 
@@ -65,6 +65,22 @@ Milestone 5: one real agent run with Gemini using both tools.
   model's default thinking ran past it). Fix: `LLM_THINKING_LEVEL=low` (configurable) and a 120 s
   timeout. After the fix: answered in seconds. Real LLM calls so far: 4 successful requests in M4
   (+ the failed attempts above).
+- **Gemini function results (M5):** the API rejected `role="tool"` (400 INVALID_ARGUMENT);
+  function results are now sent in a `user` turn, parallel results grouped. Offline test added
+  (`tests/test_gemini_conversion.py`, new file).
+- **Free-tier quota (M5):** `gemini-3.8-flash` allows only **20 requests per day per model** on
+  the free tier (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`, quotaValue 20). The quota
+  ran out after the M4 checks plus 503/504 overload retries ("model is experiencing high
+  demand"). The CLI and eval now take `--model`; quotas are per model.
+- **M5 real run:** `python -m sec_analyst.cli --model gemini-3.5-flash-lite agent "What does
+  NVIDIA's 10-K say about its two operating segments, and what does the stock screener
+  currently report for NVDA?"` -> step 1 called `search_filings` and `get_screener_result` in
+  parallel; step 2 answered with 2 verified citations (NVDA-2026-item15-073). 2 LLM calls.
+- **Screener unreachable:** `get_screener_result` returned "Stock screener unreachable
+  (ConnectionError)". SCREENER_URL is set in .env but nothing answered at that address during
+  the run (the author's screener service was not running or is not reachable from this
+  machine). The agent handled it as designed and said live data was unavailable. The
+  endpoint path (`/api/screener/{ticker}`) is an assumption and may need `SCREENER_PATH`.
 - RAG's `answer_question` raises `LLMError` (the eval needs to tell errors from "not found");
   the CLI catches it and prints a clean error. Retries are logged as warnings.
 

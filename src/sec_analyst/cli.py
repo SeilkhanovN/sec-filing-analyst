@@ -36,6 +36,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
     parser = argparse.ArgumentParser(prog="python -m sec_analyst.cli", description="SEC Filing Analyst")
+    parser.add_argument("--model", default=None, help="override LLM_MODEL for this command")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("check-config", help="show which settings are configured (never shows secrets)")
 
@@ -58,6 +59,8 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     settings = load_settings()
+    if args.model:
+        settings.llm_model = args.model
 
     if args.command == "check-config":
         print(json.dumps(settings.describe(), indent=2))
