@@ -196,7 +196,7 @@ class GeminiClient:
         self,
         api_key: str,
         model: str,
-        max_attempts: int = 5,
+        max_attempts: int = 6,
         timeout_s: float = 120.0,
         thinking_level: str = "low",
     ):
@@ -247,8 +247,16 @@ class GeminiClient:
                 parts += [t.Part.from_function_call(name=c.name, args=c.args) for c in m.tool_calls]
                 contents.append(t.Content(role="model", parts=parts))
             elif m.role == "tool":
+                # The Gemini API expects function results in a "user" turn; results of
+                # parallel calls from one model turn go together in a single turn.
                 part = t.Part.from_function_response(name=m.tool_name or "tool", response=m.tool_result or {})
-                contents.append(t.Content(role="tool", parts=[part]))
+                previous = contents[-1] if contents else None
+                if previous is not None and previous.role == "user" and all(
+                    p.function_response is not None for p in previous.parts or []
+                ):
+                    previous.parts.append(part)
+                else:
+                    contents.append(t.Content(role="user", parts=[part]))
             else:
                 contents.append(t.Content(role="user", parts=[t.Part.from_text(text=m.text)]))
         return contents
@@ -287,7 +295,7 @@ class GeminiClient:
 
         try:
             response = call_with_retry(
-                _call, self._is_retryable, max_attempts=self.max_attempts,
+                _call, self._is_retryable, max_attempts=self.max_attempts, base_delay=3.0,
                 retry_after=self._retry_after, on_retry=_log_retry,
             )
         except Exception as exc:  # noqa: BLE001
