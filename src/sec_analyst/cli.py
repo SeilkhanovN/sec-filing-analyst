@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import os
 import sys
 
 from .citations import format_citation
@@ -31,6 +33,8 @@ def _print_answer(answer, show_steps: bool = False) -> None:
 def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # Windows consoles
+    logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
     parser = argparse.ArgumentParser(prog="python -m sec_analyst.cli", description="SEC Filing Analyst")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("check-config", help="show which settings are configured (never shows secrets)")
@@ -87,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(m.name)
         return 0
 
-    from .llm import make_llm_client
+    from .llm import LLMError, make_llm_client
 
     retriever = pipeline.build_retriever(settings)
     llm = make_llm_client(settings)
@@ -95,7 +99,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "ask":
         from .rag import answer_question
 
-        _print_answer(answer_question(args.question, retriever, llm, k=args.k, ticker=args.ticker))
+        try:
+            _print_answer(answer_question(args.question, retriever, llm, k=args.k, ticker=args.ticker))
+        except LLMError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 2
         return 0
     if args.command == "agent":
         agent = pipeline.build_agent(settings, retriever, llm, max_steps=args.max_steps)

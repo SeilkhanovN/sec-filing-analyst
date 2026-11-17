@@ -35,6 +35,7 @@ class Settings:
     gemini_api_key: str = ""
     llm_provider: str = "gemini"
     llm_model: str = DEFAULT_LLM_MODEL
+    thinking_level: str = "low"
     edgar_user_agent: str = ""
     screener_url: str = ""
     screener_path: str = "/api/screener/{ticker}"
@@ -51,6 +52,7 @@ class Settings:
             "SCREENER_URL": "set" if self.screener_url else "NOT SET",
             "LLM_PROVIDER": self.llm_provider,
             "LLM_MODEL": self.llm_model,
+            "LLM_THINKING_LEVEL": self.thinking_level or "(model default)",
             "EMBEDDING_MODEL": self.embedding_model,
             "DATA_DIR": str(self.data_dir),
             "CHROMA_DIR": str(self.chroma_dir),
@@ -66,6 +68,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
         gemini_api_key=_env("GEMINI_API_KEY"),
         llm_provider=_env("LLM_PROVIDER", "gemini").lower(),
         llm_model=_env("LLM_MODEL", DEFAULT_LLM_MODEL),
+        thinking_level=_env("LLM_THINKING_LEVEL", "low"),
         edgar_user_agent=_env("EDGAR_USER_AGENT"),
         screener_url=_env("SCREENER_URL").rstrip("/"),
         screener_path=_env("SCREENER_PATH", "/api/screener/{ticker}"),

@@ -9,7 +9,7 @@ Overnight build log for SEC Filing Analyst. Newest state at the top of each sect
 | 1 | Scaffold | PASSED | 2026-11-18 |
 | 2 | Tests first | PASSED | 2026-11-18 |
 | 3 | Ingestion | PASSED (AAPL 203, MSFT 276, NVDA 284, TSLA 343, AMZN 244 chunks) | 2026-11-18 |
-| 4 | Retrieval and answers | not started | |
+| 4 | Retrieval and answers | PASSED (real Gemini: cited answer verified; unanswerable -> "Not found in the filings") | 2026-11-18 |
 | 5 | Agent | not started | |
 | 6 | Evaluation | not started | |
 | 7 | Docs | not started | |
@@ -17,7 +17,7 @@ Overnight build log for SEC Filing Analyst. Newest state at the top of each sect
 
 ## Next step
 
-Milestone 4: real-LLM check of `python -m sec_analyst.cli ask` (answerable + unanswerable).
+Milestone 5: one real agent run with Gemini using both tools.
 
 ## Filings indexed (latest 10-K as of 2026-11-18)
 
@@ -58,6 +58,15 @@ Milestone 4: real-LLM check of `python -m sec_analyst.cli ask` (answerable + una
 - NVDA puts its financial statements under Item 15, not Item 8 (Item 8 only refers to them);
   the index reflects that faithfully.
 - Fiscal year = year of the filing's report date (matches each company's own naming).
+- **Model verified (M4):** `models.list` (no generation cost) shows `gemini-3.8-flash` available
+  to this key, and real free-tier calls succeed.
+- **Thinking level `low` (M4):** the first unanswerable-question call failed 5 times with
+  `504 DEADLINE_EXCEEDED` (the SDK passes the client timeout to the server as a deadline and the
+  model's default thinking ran past it). Fix: `LLM_THINKING_LEVEL=low` (configurable) and a 120 s
+  timeout. After the fix: answered in seconds. Real LLM calls so far: 4 successful requests in M4
+  (+ the failed attempts above).
+- RAG's `answer_question` raises `LLMError` (the eval needs to tell errors from "not found");
+  the CLI catches it and prints a clean error. Retries are logged as warnings.
 
 ## Changes to tests/ or eval/ after they were committed
 

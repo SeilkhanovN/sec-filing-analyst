@@ -12,12 +12,14 @@ SDK format. Implementations:
 from __future__ import annotations
 
 import json
+import logging
 import random
 import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
+log = logging.getLogger(__name__)
 
 @dataclass
 class ToolSpec:
@@ -89,6 +91,7 @@ def call_with_retry(
     max_delay: float = 60.0,
     sleep: Callable[[float], None] = time.sleep,
     retry_after: Callable[[Exception], float | None] = lambda e: None,
+    on_retry: Callable[[Exception, float, int], None] | None = None,
 ) -> Any:
     """Call fn(); on a retryable error wait with exponential backoff and try again.
 
@@ -104,6 +107,8 @@ def call_with_retry(
             hinted = retry_after(exc)
             delay = hinted if hinted is not None else base_delay * 2 ** (attempt - 1)
             delay = min(max_delay, delay) + random.uniform(0, 0.5)
+            if on_retry is not None:
+                on_retry(exc, delay, attempt)
             sleep(delay)
     raise AssertionError("unreachable")
 
@@ -187,7 +192,14 @@ class GeminiClient:
 
     RETRYABLE_CODES = {429, 500, 502, 503, 504}
 
-    def __init__(self, api_key: str, model: str, max_attempts: int = 6, timeout_s: float = 90.0):
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        max_attempts: int = 5,
+        timeout_s: float = 120.0,
+        thinking_level: str = "low",
+    ):
         if not api_key:
             raise LLMError("GEMINI_API_KEY is not set (see .env.example)")
         from google import genai  # imported lazily so tests never need the SDK
@@ -199,6 +211,10 @@ class GeminiClient:
         )
         self.model = model
         self.max_attempts = max_attempts
+        # Gemini 3 models "think" before answering. Extracting facts from given passages
+        # needs little reasoning; "low" cuts latency and avoids server deadline errors.
+        # Empty string = model default (needed for older models without thinking levels).
+        self.thinking_level = thinking_level.strip().upper()
         self.calls_made = 0
 
     # -- error classification --------------------------------------------------
@@ -240,6 +256,8 @@ class GeminiClient:
     def generate(self, messages, system=None, tools=None, json_output=False) -> LLMResponse:
         t = self._types
         config_kwargs: dict[str, Any] = {"temperature": 0.0}
+        if self.thinking_level:
+            config_kwargs["thinking_config"] = t.ThinkingConfig(thinking_level=self.thinking_level)
         if system:
             config_kwargs["system_instruction"] = system
         if tools:
@@ -263,9 +281,14 @@ class GeminiClient:
             self.calls_made += 1
             return self._client.models.generate_content(model=self.model, contents=contents, config=config)
 
+        def _log_retry(exc: Exception, delay: float, attempt: int) -> None:
+            log.warning("Gemini %s (attempt %d/%d); retrying in %.0fs",
+                        self._code(exc) or type(exc).__name__, attempt, self.max_attempts, delay)
+
         try:
             response = call_with_retry(
-                _call, self._is_retryable, max_attempts=self.max_attempts, retry_after=self._retry_after
+                _call, self._is_retryable, max_attempts=self.max_attempts,
+                retry_after=self._retry_after, on_retry=_log_retry,
             )
         except Exception as exc:  # noqa: BLE001
             raise LLMError(f"Gemini call failed: {type(exc).__name__}: {str(exc)[:300]}") from exc
@@ -312,7 +335,7 @@ def make_llm_client(settings) -> LLMClient:
     if settings.llm_provider == "fake":
         return FakeClient(echo_context_fake)
     if settings.llm_provider == "gemini":
-        return GeminiClient(settings.gemini_api_key, settings.llm_model)
+        return GeminiClient(settings.gemini_api_key, settings.llm_model, thinking_level=settings.thinking_level)
     if settings.llm_provider == "openai":
         return OpenAIClient()
     raise LLMError(f"Unknown LLM_PROVIDER: {settings.llm_provider!r}")
