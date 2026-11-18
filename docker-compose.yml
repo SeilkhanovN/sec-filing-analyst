@@ -1,8 +1,24 @@
 services:
-  # Default service: the CLI image. (Milestone 8 switches the default to the web app.)
-  analyst:
+  # Default service: the web app (FastAPI + static page) on http://127.0.0.1:8000
+  web:
+    build: .
+    image: sec-filing-analyst
+    env_file: .env
+    ports:
+      - "127.0.0.1:8000:8000"   # published on the host's loopback interface only
+    volumes:
+      - ./data:/app/data
+      - ./chroma_db:/app/chroma_db
+    restart: unless-stopped
+
+  # Command-line tools (ingest, ask, agent, eval). Not started by `docker compose up`:
+  #   docker compose run --rm cli python -m sec_analyst.cli ingest
+  cli:
+    image: sec-filing-analyst
     build: .
     env_file: .env
     volumes:
       - ./data:/app/data
       - ./chroma_db:/app/chroma_db
+    profiles: ["cli"]
+    command: ["python", "-m", "sec_analyst.cli", "--help"]

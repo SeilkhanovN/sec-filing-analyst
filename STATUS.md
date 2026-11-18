@@ -13,11 +13,12 @@ Overnight build log for SEC Filing Analyst. Newest state at the top of each sect
 | 5 | Agent | PASSED (mock-LLM tests pass; real Gemini run used both tools; screener unreachable, see notes) | 2026-11-18 |
 | 6 | Evaluation | PASSED (retrieval hit 72.0%, answer correctness 80.0% answerable + 3/3 refusals, citation validity 100% 23/23) | 2026-11-18 |
 | 7 | Docs | PASSED (README commands run: pytest, check-config, ingest, count, ask --ticker, agent, eval; pip dry-run of requirements) | 2026-11-18 |
-| 8 | Web app | not started | |
+| 8 | Web app | PASSED (13 API tests; real server on 127.0.0.1: /health, /filings, /ask real Gemini, 422 check, page + assets served) | 2026-11-18 |
 
 ## Next step
 
-Milestone 8: FastAPI backend (/health, /filings, /ask) + static page, tests, server check.
+Final review: re-run all checks, tag v1-working, write docs/IMPROVEMENTS.md, implement the
+top improvements one at a time.
 
 ## Evaluation (M6 baseline)
 
@@ -105,6 +106,11 @@ answers from another chunk with the same fact (nvda-3, tsla-5).
 - **Eval questions** were written from facts located with `eval/search_chunks.py`; a script
   confirmed that every expected fact occurs verbatim (after normalisation) in its source
   chunk. `also_in` lists overlapping chunks that contain the same fact.
+- **Web app (M8):** `create_app(services)` takes injected services (tests pass fakes);
+  production builds them lazily on the first request. LLM outages map to HTTP 503, validation
+  to 422, anything else to a generic 500. The front end is three static files; the frontend
+  design skill was not invoked (the brief's detailed design spec was followed directly).
+  Docker: `web` is the default service; `cli` is behind a compose profile.
 - RAG's `answer_question` raises `LLMError` (the eval needs to tell errors from "not found");
   the CLI catches it and prints a clean error. Retries are logged as warnings.
 

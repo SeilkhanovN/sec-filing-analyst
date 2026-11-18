@@ -15,6 +15,8 @@ from .llm import LLMClient, LLMError, Message
 from .rag import ANSWER_FORMAT, NOT_FOUND_ANSWER, Answer, answer_from_model_output
 from .tools import Tool
 
+LLM_UNAVAILABLE = "The language model is unavailable right now."
+
 AGENT_SYSTEM = f"""You are a financial research agent with two tools:
 - search_filings: passages from the companies' latest 10-K filings (cite these),
 - get_screener_result: live market data from a stock screener API.
@@ -66,7 +68,7 @@ class Agent:
             try:
                 response = self.llm.generate(messages, system=AGENT_SYSTEM, tools=specs)
             except LLMError as exc:
-                return Answer(question, "The language model is unavailable right now.", False,
+                return Answer(question, LLM_UNAVAILABLE, False,
                               steps=steps, usage=usage, retrieved_ids=seen_ids, error=str(exc))
             usage["llm_calls"] += 1
             for key in ("input_tokens", "output_tokens"):

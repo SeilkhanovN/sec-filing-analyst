@@ -68,6 +68,7 @@ Source layout (`src/sec_analyst/`):
 | `llm.py` | `LLMClient` interface, `GeminiClient`, `FakeClient`, retry/backoff, `OpenAIClient` stub |
 | `tools.py`, `agent.py` | the two agent tools and the tool-use loop |
 | `pipeline.py`, `cli.py` | wiring and the command line |
+| `api.py`, `static/` | FastAPI backend and the single-page front end |
 
 A plain-language explanation of every part, with interview questions, is in
 [docs/EXPLAINED.md](docs/EXPLAINED.md).
@@ -96,16 +97,47 @@ to try the pipeline without an API key (the fake model just quotes the top passa
 The first `ingest` downloads the embedding model (~130 MB) into `data/hf_cache` and the five
 filings into `data/raw`. Both stay inside the project folder.
 
+## Web app
+
+```powershell
+.venv\Scripts\python -m uvicorn sec_analyst.api:app --host 127.0.0.1 --port 8000
+# or: .venv\Scripts\python -m sec_analyst.api
+```
+
+Open http://127.0.0.1:8000. The page has a question box, a company selector
+(pills built from `/filings`), a mode switch (Agent with tools, or Direct with one model
+call) and an Ask button (Enter submits). The answer card shows a "Citations verified"
+badge and numbered source chips. Clicking a chip opens a quote card with the company,
+fiscal year, section and chunk id, plus the full source passage with the quoted text
+highlighted. Agent runs list their tool calls. There are loading, empty (three example
+questions) and error states, and light and dark themes (follows the system setting, with a
+toggle that is remembered). It is plain HTML, CSS and JavaScript: no build step, no CDN, no
+external fonts. All server text is inserted with `textContent`.
+
+| Endpoint | Description |
+|---|---|
+| `GET /health` | `{"status": "ok", "indexed_chunks": 1350, "llm_provider": ..., "model": ...}` |
+| `GET /filings` | indexed companies: ticker, name, chunk count, fiscal year, filing date, source URL |
+| `POST /ask` | body `{"question": str (3-500 chars), "ticker": "AAPL" (optional), "mode": "agent" or "rag"}` returns answer, found, grounded, citations (with source passage), agent steps, usage, latency |
+
+Invalid input returns 422 with a readable message. If the LLM is rate-limited or down, the
+response is 503 with a "try again" message. Unexpected errors return a generic 500 without
+internals. `python scripts/smoke_server.py` starts the real server on 127.0.0.1, calls every
+endpoint and stops it (`--fake` runs it without an API key).
+
 ## Run it with Docker
 
 ```bash
-docker compose build
-docker compose run --rm analyst python -m sec_analyst.cli ingest
-docker compose run --rm analyst python -m sec_analyst.cli ask "What are Apple's reportable segments?"
+docker compose up --build web                      # web app on http://127.0.0.1:8000
+docker compose run --rm cli python -m sec_analyst.cli ingest
+docker compose run --rm cli python -m sec_analyst.cli ask "What are Apple's reportable segments?"
 ```
 
 `data/` and `chroma_db/` are mounted as volumes, so the index survives container restarts.
-The image installs CPU-only PyTorch and runs as a non-root user.
+Run `ingest` once (or reuse an index built on the host). The image installs CPU-only
+PyTorch, runs as a non-root user and has a health check. Inside the container the server
+listens on 0.0.0.0 (required for port publishing), and compose publishes it on the host's
+127.0.0.1 only. On Linux hosts the mounted folders must be writable by the container user.
 **The Dockerfile and docker-compose.yml were written and reviewed but not executed** during
 the overnight build, because Docker commands were not permitted in that environment.
 
@@ -130,7 +162,7 @@ logged), and a fast failure on daily-quota errors.
 - **Provider-agnostic LLM layer.** Everything uses `LLMClient.generate()` with neutral
   message and tool types. `OpenAIClient` is an explicitly unimplemented stub showing where
   a second provider plugs in. It is not tested and not claimed to work.
-- **Offline tests.** 45 unit tests use a scripted fake LLM, a hashing fake embedder, an
+- **Offline tests.** 58 unit tests (including API tests with FastAPI's TestClient) use a scripted fake LLM, a hashing fake embedder, an
   in-memory store, a temporary Chroma folder and a tiny local HTTP server that imitates the
   screener API. CI runs them with no secrets.
 - **Simple over clever.** Pure semantic search and one prompt, with no frameworks. Each
