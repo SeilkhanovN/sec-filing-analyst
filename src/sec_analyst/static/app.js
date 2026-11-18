@@ -174,7 +174,8 @@
         meta.appendChild(el("strong", null, (c.company || "Unknown source") + (c.fiscal_year ? " · FY" + c.fiscal_year : "")));
         meta.appendChild(document.createTextNode(c.section ? " · " + c.section : ""));
         card.appendChild(meta);
-        card.appendChild(el("div", "quote-id", c.chunk_id + (c.valid ? "" : "  —  quote not found in this passage")));
+        card.appendChild(el("div", "quote-id", c.chunk_id + (c.valid ? "" : "  —  quote not found in this passage") +
+          (c.corrected_from ? "  —  re-attributed (the model cited " + c.corrected_from + ")" : "")));
         card.appendChild(c.passage ? renderPassage(c.passage, c.quote) : el("p", "passage", c.quote));
 
         chip.addEventListener("click", function () {

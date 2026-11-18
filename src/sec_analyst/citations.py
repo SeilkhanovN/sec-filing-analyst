@@ -116,10 +116,21 @@ def format_citation(number: int, c: Citation) -> str:
     return f'[{number}] {source} | {c.chunk_id}: "{c.quote}"{status}'
 
 
+_DELIMITER_RE = re.compile(r"<\s*/?\s*context\s*>|\[chunk_id:", re.I)
+
+
+def neutralize_delimiters(text: str) -> str:
+    """Retrieved text is untrusted. Remove anything that looks like our own prompt
+    delimiters, so a passage cannot close the <context> block early or fake a new chunk
+    header and then pose as instructions outside the data."""
+    return _DELIMITER_RE.sub("[removed delimiter]", text)
+
+
 def format_context(chunks: Iterable[Chunk]) -> str:
     """Render retrieved chunks for the prompt. Each block starts with its chunk id."""
     blocks = [
-        f"[chunk_id: {c.chunk_id}] {c.company} ({c.ticker}) | fiscal year {c.fiscal_year} | {c.section}\n{c.text}"
+        f"[chunk_id: {c.chunk_id}] {c.company} ({c.ticker}) | fiscal year {c.fiscal_year} | {c.section}\n"
+        f"{neutralize_delimiters(c.text)}"
         for c in chunks
     ]
     return "\n\n".join(blocks)

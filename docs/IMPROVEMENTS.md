@@ -109,3 +109,17 @@ The v1 baseline is saved in `docs/eval_baseline_v1.json`.
   stays invalid (tested). In this run, 1 of 25 citations was re-attributed.
 - LLM calls: 28 (attempt 1) + 28 (prompt change); the repair step reused cached replies.
 - Not changed: chunking (chunk ids, and so the eval set, stay valid) and the eval files.
+
+### 2. Prompt-injection hardening: KEPT
+
+- `citations.neutralize_delimiters` replaces `<context>`, `</context>` and `[chunk_id:` inside
+  retrieved text before it enters the prompt. A passage can no longer close the data block
+  early or fake a chunk header.
+- New `tests/test_prompt_injection.py` (4 tests): delimiter escape; both system prompts
+  declare retrieved text and tool results untrusted; a fake model that obeys an injected
+  instruction gets no verified citation (`grounded: false`); hostile tool output stays in the
+  tool message and never changes the system prompt.
+- Eval before/after: identical (hit 80.0%, correctness 88.0%, refusals 3/3, citations 100%).
+  No real chunk contained a delimiter, so all 28 replies came from the cache (0 LLM calls).
+- Honest limit: if an injected sentence is in the filing and the model quotes it, the quote
+  is "valid" (it exists). Verification proves provenance, not truth.
