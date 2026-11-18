@@ -16,16 +16,21 @@ Evaluation on 28 questions written from the downloaded filings (25 with a known 
 source chunk, 3 that the filings cannot answer). Model `gemini-3.5-flash-lite`, top-k 5.
 Full per-question table: [eval/results.md](eval/results.md).
 
-| Metric | Value |
-|---|---|
-| Retrieval hit rate (source chunk in top 5) | 72.0% (18/25) |
-| Answer correctness (expected fact in answer) | 80.0% (20/25) |
-| Unanswerable questions correctly refused | 3/3 |
-| Citation validity (quote found in cited chunk) | 100% (23/23) |
+| Metric | v1: vector search | v2: hybrid search + citation repair |
+|---|---|---|
+| Retrieval hit rate (source chunk in top 5) | 72.0% (18/25) | **80.0%** (20/25) |
+| Answer correctness (expected fact in answer) | 80.0% (20/25) | **88.0%** (22/25) |
+| Unanswerable questions correctly refused | 3/3 | 3/3 |
+| Citation validity (quote found in cited chunk) | 100% (23/23) | 100% (25/25) |
 
-What the numbers say: when retrieval finds the right passage, the model answers correctly
-and cites it verbatim. All 5 wrong answers came after a retrieval miss, and in each case the
-model said "not found" instead of guessing. Retrieval is the bottleneck.
+What the numbers say: v1 answered correctly and quoted verbatim whenever retrieval found the
+right passage. All 5 wrong answers came after a retrieval miss, and each time the model said
+"not found" instead of guessing. Adding BM25 keyword search fixed four of those misses.
+One hybrid answer quoted a table row under a neighbouring chunk's id. The verifier caught
+it, and citation repair re-attributed it to the chunk that really contains the quote. The
+remaining errors are retrieval misses (nvda-1, amzn-5, tsla-3). How each change was measured
+and kept: [docs/IMPROVEMENTS.md](docs/IMPROVEMENTS.md). Regression check:
+`python scripts/compare_eval.py`.
 
 ## Architecture
 
@@ -39,7 +44,7 @@ flowchart LR
         E --> F[(Chroma vector DB)]
     end
     subgraph Query [Answering a question]
-        Q[Question] --> R[Embed + top-k search]
+        Q[Question] --> R[Hybrid search: vectors + BM25, fused with RRF]
         F --> R
         R --> P[Prompt: answer only from context, JSON with chunk ids + quotes]
         P --> L[LLMClient: Gemini / Fake]
@@ -62,8 +67,8 @@ Source layout (`src/sec_analyst/`):
 | `chunking.py` | paragraph-packing chunker with overlap and stable chunk ids |
 | `embeddings.py` | sentence-transformers embedder; hashing fake for tests |
 | `store.py` | Chroma store and in-memory store behind one interface |
-| `retrieval.py` | top-k semantic search with optional ticker filter |
-| `citations.py` | build, verify and format citations |
+| `retrieval.py`, `keyword.py` | hybrid search: vectors + BM25 fused with reciprocal rank fusion; optional ticker filter |
+| `citations.py` | build, verify, repair and format citations; neutralise prompt delimiters |
 | `rag.py` | grounded answering (one LLM call) |
 | `llm.py` | `LLMClient` interface, `GeminiClient`, `FakeClient`, retry/backoff, `OpenAIClient` stub |
 | `tools.py`, `agent.py` | the two agent tools and the tool-use loop |
@@ -71,7 +76,8 @@ Source layout (`src/sec_analyst/`):
 | `api.py`, `static/` | FastAPI backend and the single-page front end |
 
 A plain-language explanation of every part, with interview questions, is in
-[docs/EXPLAINED.md](docs/EXPLAINED.md).
+[docs/EXPLAINED.md](docs/EXPLAINED.md). Design decisions and trade-offs are in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Run it on Windows (PowerShell)
 
@@ -158,11 +164,17 @@ logged), and a fast failure on daily-quota errors.
 ## Design choices
 
 - **Grounding first.** The model must return JSON with chunk ids and verbatim quotes.
-  Code verifies every quote, and unverifiable citations are flagged, not hidden.
+  Code verifies every quote, and unverifiable citations are flagged, not hidden. A real
+  quote under the wrong chunk id is re-attributed (and marked as such).
+- **Hybrid retrieval.** Vector similarity finds meaning, and BM25 finds exact terms
+  (headcounts, addresses, table labels). Reciprocal rank fusion merges the two rankings.
+  `RETRIEVAL_MODE=vector` turns it off.
+- **Untrusted data.** Retrieved text and tool output are treated as data. Prompt
+  delimiters inside passages are neutralised, and tests cover injection attempts.
 - **Provider-agnostic LLM layer.** Everything uses `LLMClient.generate()` with neutral
   message and tool types. `OpenAIClient` is an explicitly unimplemented stub showing where
   a second provider plugs in. It is not tested and not claimed to work.
-- **Offline tests.** 58 unit tests (including API tests with FastAPI's TestClient) use a scripted fake LLM, a hashing fake embedder, an
+- **Offline tests.** 73 unit tests (including API tests with FastAPI's TestClient) use a scripted fake LLM, a hashing fake embedder, an
   in-memory store, a temporary Chroma folder and a tiny local HTTP server that imitates the
   screener API. CI runs them with no secrets.
 - **Simple over clever.** Pure semantic search and one prompt, with no frameworks. Each
@@ -170,8 +182,8 @@ logged), and a fast failure on daily-quota errors.
 
 ## Limitations
 
-- Retrieval is pure vector search. It misses some exact-wording facts (employee counts, an
-  address). See the eval table.
+- Retrieval still misses 5 of 25 source chunks (see the eval table). There is no reranker,
+  and BM25 runs in memory (fine for ~1,400 chunks, not for millions).
 - Answer correctness is a string match on a short expected fact. It can mark a correct but
   differently phrased answer as wrong. 28 questions is a small evaluation.
 - Citation verification proves the quote exists in the chunk. It does not prove the quote

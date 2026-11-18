@@ -60,9 +60,17 @@ nearest vectors to a query (HNSW index, cosine distance). We always pass our own
 so Chroma never downloads its own model. Filtering by ticker uses Chroma's metadata
 `where` clause. Tests use an in-memory store with the same interface.
 
-### 7. Retrieval (`retrieval.py`)
-Embed the question, return the top-k (default 5) most similar chunks, optionally only for
-one ticker. This is pure semantic search: no keywords, no reranking.
+### 7. Retrieval (`retrieval.py`, `keyword.py`)
+Hybrid search. (1) Embed the question and take the 20 most similar chunks from Chroma.
+(2) Score all chunks with **BM25**, the classic keyword formula: a chunk scores higher when
+it contains the question's words, rare words count more, and long chunks are slightly
+penalised. Take the top 20. (3) Merge the two lists with **reciprocal rank fusion**: each
+chunk gets `1/(60 + rank)` from each list it appears in, so chunks that both methods like
+rise to the top. Only ranks are used, so cosine scores and BM25 scores never need to be on
+the same scale. Keep the top k (default 5), optionally for one ticker only. Why: in v1,
+pure vector search missed exact-wording facts ("full-time equivalent employees", a street
+address). Hybrid search raised the hit rate from 72% to 80%. `RETRIEVAL_MODE=vector`
+switches it off.
 
 ### 8. Grounded answering (`rag.py`, `citations.py`)
 The retrieved chunks are placed in the prompt inside `<context>` tags, each labelled with
@@ -73,6 +81,16 @@ citation: does the chunk id exist among the retrieved chunks, and does the quote
 appear in that chunk's text (ignoring case, whitespace, curly quotes)? Citations that fail
 are kept but marked `valid: false`, so problems are visible rather than hidden. If
 `found` is false, the user sees a fixed "Not found in the filings" message.
+
+**Citation repair:** sometimes the model copies a sentence correctly but labels it with a
+neighbouring passage's id. If the quote is not in the cited chunk but is found verbatim in
+another passage the model was shown, the citation is moved there and `corrected_from`
+records the model's original id. The CLI and the page show this. A quote that appears
+nowhere stays invalid, so nothing is invented.
+
+**Prompt-injection defence:** before passages go into the prompt, anything that looks like
+our own delimiters (`<context>`, `</context>`, `[chunk_id:`) is replaced. A passage therefore
+cannot "close" the data block and pose as instructions.
 
 ### 9. LLM interface (`llm.py`)
 All code talks to one small interface: `generate(messages, system, tools, json_output)`
@@ -104,7 +122,9 @@ checked that every expected fact really occurs in its source chunk. `run_eval.py
 (a) retrieval hit rate (source chunk in top-k), (b) answer correctness (expected fact
 appears in the answer; unanswerable questions must be refused), (c) citation validity
 (quote found in cited chunk). LLM replies are cached so a re-run after a quota error does
-not spend calls twice.
+not spend calls twice. `scripts/compare_eval.py` compares the latest results with the
+stored v1 baseline (`docs/eval_baseline_v1.json`) and exits with an error if any metric got
+worse. Every improvement in `docs/IMPROVEMENTS.md` had to pass that rule.
 
 ### 12. Web app (`api.py`, `static/`)
 See the README: FastAPI with `/health`, `/filings` and `/ask`, and one static HTML page.
@@ -183,6 +203,36 @@ See the README: FastAPI with `/health`, `/filings` and `/ask`, and one static HT
     an answer cache, and a paid LLM tier with concurrency limits.
 
 15. **What would you improve next?**
-    Hybrid search (keywords + vectors) because exact numbers and names are a weak spot of
-    pure embeddings; a reranker; a faithfulness check; more and harder eval questions; and
-    structured logging of latency and token usage per request. See `docs/IMPROVEMENTS.md`.
+    A reranker for the remaining retrieval misses; a faithfulness check; more and harder
+    eval questions (including more unanswerable ones); an answer cache in the API; ruff in
+    CI. See `docs/IMPROVEMENTS.md`.
+
+### Questions about the improvement phase
+
+16. **Why hybrid search, and why reciprocal rank fusion instead of adding scores?**
+    The eval showed that every wrong answer followed a retrieval miss on an exact-wording
+    fact, which is where keyword search is strong. Cosine similarities (around 0.5 to 0.9)
+    and BM25 scores (unbounded) are on different scales, so adding them would need tuned
+    weights. RRF only uses ranks and has one standard constant (60).
+
+17. **Hybrid search lost two questions that vector search had. Why keep it?**
+    It fixed four and lost two (net +2 on hit rate, +8 points on correctness), and no metric
+    got worse. Fusion can push a good vector hit below the cut-off. A reranker or a larger
+    k would be the next experiment, judged by the same eval.
+
+18. **Isn't citation repair just making the metric look better?**
+    It does not accept anything new: the quote must exist verbatim in a passage the model
+    was shown, and the answer then cites that passage, which is the correct source for the
+    user. It is recorded (`corrected_from`), shown in the UI and counted in
+    `docs/IMPROVEMENTS.md` (1 of 25 citations). Without it, that citation would point to the
+    wrong passage.
+
+19. **How do you know a change did not make things worse?**
+    `scripts/compare_eval.py` against a stored baseline, plus the full unit suite. A change
+    is kept only if no metric drops. The first hybrid attempt lowered citation validity
+    (23/24), so it was not accepted until fixed.
+
+20. **Why load the embedding model "offline"?**
+    The smoke-test log showed four Hugging Face requests on every server start, even with
+    the model cached. With `local_files_only=True` when the cache exists, startup is faster,
+    works without internet (useful in containers) and always uses the same files.
