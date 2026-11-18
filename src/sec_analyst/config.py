@@ -43,6 +43,7 @@ class Settings:
     data_dir: Path = field(default_factory=lambda: PROJECT_ROOT / "data")
     chroma_dir: Path = field(default_factory=lambda: PROJECT_ROOT / "chroma_db")
     top_k: int = 5
+    retrieval_mode: str = "hybrid"
 
     def describe(self) -> dict[str, str]:
         """Safe summary for logs: secrets are reported only as set / not set."""
@@ -54,6 +55,7 @@ class Settings:
             "LLM_MODEL": self.llm_model,
             "LLM_THINKING_LEVEL": self.thinking_level or "(model default)",
             "EMBEDDING_MODEL": self.embedding_model,
+            "RETRIEVAL_MODE": self.retrieval_mode,
             "DATA_DIR": str(self.data_dir),
             "CHROMA_DIR": str(self.chroma_dir),
         }
@@ -76,4 +78,5 @@ def load_settings(env_file: Path | None = None) -> Settings:
         data_dir=Path(data_dir) if data_dir else PROJECT_ROOT / "data",
         chroma_dir=Path(chroma_dir) if chroma_dir else PROJECT_ROOT / "chroma_db",
         top_k=int(_env("TOP_K", "5")),
+        retrieval_mode=_env("RETRIEVAL_MODE", "hybrid").lower(),
     )

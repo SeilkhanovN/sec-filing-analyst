@@ -75,7 +75,8 @@ class Agent:
                 usage[key] += response.usage.get(key, 0)
 
             if not response.tool_calls:
-                answer = answer_from_model_output(question, response.text, self.chunk_lookup)
+                seen_chunks = [c for c in map(self.chunk_lookup, seen_ids) if c is not None]
+                answer = answer_from_model_output(question, response.text, self.chunk_lookup, seen_chunks)
                 if answer.error and response.text.strip():
                     # The model answered in prose instead of JSON: keep it, but uncited.
                     answer = Answer(question, response.text.strip(), True, error="answer was not JSON; no citations")

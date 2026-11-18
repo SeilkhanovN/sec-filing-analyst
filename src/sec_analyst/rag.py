@@ -18,6 +18,8 @@ ANSWER_FORMAT = """Reply with one JSON object and nothing else:
  "citations": [{"chunk_id": "<id of the passage>", "quote": "<short phrase copied word for word from that passage>"}]}
 Rules for citations: every fact in the answer needs a citation; each quote must be copied
 exactly (character for character) from the passage with that chunk_id, 5 to 30 words long.
+Never add, drop or reformat symbols or numbers in a quote (for example, do not add a $ that
+the passage does not show); prefer quoting a sentence over a table row.
 If the passages do not contain the answer, reply {"found": false, "answer": "", "citations": []}."""
 
 RAG_SYSTEM = f"""You are a careful financial analyst answering questions about SEC 10-K filings.
@@ -62,9 +64,10 @@ def build_prompt(question: str, chunks: list[Chunk]) -> str:
 
 
 def answer_from_model_output(
-    question: str, text: str, lookup: Callable[[str], Chunk | None]
+    question: str, text: str, lookup: Callable[[str], Chunk | None], candidates: list[Chunk] | None = None
 ) -> Answer:
-    """Parse the model's JSON reply into an Answer with verified citations."""
+    """Parse the model's JSON reply into an Answer with verified citations.
+    `candidates` are the passages the model saw (used for citation repair)."""
     data = parse_json_object(text)
     if data is None:
         return Answer(question, "The model returned an answer that could not be parsed.", False,
@@ -72,7 +75,7 @@ def answer_from_model_output(
     found = bool(data.get("found")) and bool(str(data.get("answer", "")).strip())
     if not found:
         return Answer(question, NOT_FOUND_ANSWER, False)
-    citations = build_citations(data.get("citations"), lookup)
+    citations = build_citations(data.get("citations"), lookup, candidates or [])
     return Answer(question, str(data["answer"]).strip(), True, citations)
 
 
@@ -90,7 +93,7 @@ def answer_question(
         system=RAG_SYSTEM,
         json_output=True,
     )
-    answer = answer_from_model_output(question, response.text, by_id.get)
+    answer = answer_from_model_output(question, response.text, by_id.get, [h.chunk for h in hits])
     answer.retrieved_ids = retrieved_ids
     answer.usage = response.usage
     return answer

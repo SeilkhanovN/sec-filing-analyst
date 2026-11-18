@@ -25,6 +25,7 @@ class Citation:
     section: str = ""
     fiscal_year: int | None = None
     valid: bool = False  # True only if the quote really appears in the cited chunk
+    corrected_from: str | None = None  # set when the model cited the wrong chunk id (see build_citations)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -54,12 +55,23 @@ def quote_in_text(quote: str, text: str) -> bool:
     return True
 
 
-def build_citations(raw: Iterable[dict] | None, lookup: Callable[[str], Chunk | None]) -> list[Citation]:
+def build_citations(
+    raw: Iterable[dict] | None,
+    lookup: Callable[[str], Chunk | None],
+    candidates: Iterable[Chunk] = (),
+) -> list[Citation]:
     """Turn the model's [{"chunk_id", "quote"}] list into verified Citation objects.
 
     `lookup` maps a chunk id to the stored chunk (or None if the id does not exist, which
     marks the citation invalid). Duplicate (chunk_id, quote) pairs are dropped.
+
+    Citation repair: models sometimes copy a sentence correctly but label it with the id of a
+    neighbouring passage. If the quote is not in the cited chunk but appears verbatim in one
+    of `candidates` (the passages the model was shown), the citation is re-attributed to that
+    chunk and `corrected_from` records the id the model gave. Nothing is invented: a quote
+    found in no passage stays invalid.
     """
+    candidates = list(candidates)
     citations: list[Citation] = []
     seen: set[tuple[str, str]] = set()
     for item in raw or []:
@@ -71,18 +83,25 @@ def build_citations(raw: Iterable[dict] | None, lookup: Callable[[str], Chunk | 
             continue
         seen.add((chunk_id, quote))
         chunk = lookup(chunk_id)
+        valid = chunk is not None and quote_in_text(quote, chunk.text)
+        corrected_from = None
+        if not valid:
+            match = next((c for c in candidates if c.chunk_id != chunk_id and quote_in_text(quote, c.text)), None)
+            if match is not None:
+                chunk, valid, corrected_from = match, True, chunk_id
         if chunk is None:
             citations.append(Citation(chunk_id=chunk_id, quote=quote, valid=False))
             continue
         citations.append(
             Citation(
-                chunk_id=chunk_id,
+                chunk_id=chunk.chunk_id,
                 quote=quote,
                 ticker=chunk.ticker,
                 company=chunk.company,
                 section=chunk.section,
                 fiscal_year=chunk.fiscal_year,
-                valid=quote_in_text(quote, chunk.text),
+                valid=valid,
+                corrected_from=corrected_from,
             )
         )
     return citations
@@ -91,6 +110,8 @@ def build_citations(raw: Iterable[dict] | None, lookup: Callable[[str], Chunk | 
 def format_citation(number: int, c: Citation) -> str:
     """One line for terminal output, e.g. [1] Apple Inc. (AAPL) FY2025, Item 1A ... | id: "quote"."""
     status = "" if c.valid else "  [UNVERIFIED: quote not found in chunk]"
+    if c.corrected_from:
+        status += f"  [re-attributed: model cited {c.corrected_from}]"
     source = f"{c.company} ({c.ticker}) FY{c.fiscal_year}, {c.section}" if c.company else "unknown source"
     return f'[{number}] {source} | {c.chunk_id}: "{c.quote}"{status}'
 

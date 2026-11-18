@@ -67,6 +67,9 @@ class InMemoryStore:
     def count_by_ticker(self) -> dict[str, int]:
         return dict(Counter(chunk.ticker for chunk, _ in self._items.values()))
 
+    def all_chunks(self) -> list[Chunk]:
+        return sorted((chunk for chunk, _ in self._items.values()), key=lambda c: c.chunk_id)
+
 
 class ChromaStore:
     """Persistent Chroma collection using cosine distance. Embeddings are always supplied by
@@ -120,6 +123,12 @@ class ChromaStore:
     def count_by_ticker(self) -> dict[str, int]:
         result = self._col.get(include=["metadatas"])
         return dict(Counter(str(m["ticker"]) for m in result["metadatas"]))
+
+    def all_chunks(self) -> list[Chunk]:
+        """Every stored chunk (used to build the in-memory BM25 keyword index)."""
+        result = self._col.get(include=["documents", "metadatas"])
+        chunks = [_chunk_from(i, d, m) for i, d, m in zip(result["ids"], result["documents"], result["metadatas"])]
+        return sorted(chunks, key=lambda c: c.chunk_id)
 
     def delete_ticker(self, ticker: str) -> None:
         self._col.delete(where={"ticker": ticker})
