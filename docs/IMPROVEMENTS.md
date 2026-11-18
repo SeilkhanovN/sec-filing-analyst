@@ -7,11 +7,11 @@ Ranked by benefit / (risk x effort), where S/M/L = 1/2/3 and low/medium/high = 1
 
 | Rank | Improvement | Benefit | Risk | Effort | Status |
 |---|---|---|---|---|---|
-| 1 | Hybrid retrieval (BM25 + vectors, reciprocal rank fusion) | high (3) | low | M | see below |
-| 2 | Prompt-injection hardening + tests | medium (2) | low | S | see below |
-| 3 | Load the embedding model offline once cached | medium (2) | low | S | see below |
-| 4 | Eval regression check against a stored baseline | medium (2) | low | S | see below |
-| 5 | Architecture decision record (docs/ARCHITECTURE.md) | medium (2) | low | S | see below |
+| 1 | Hybrid retrieval (BM25 + vectors, reciprocal rank fusion) | high (3) | low | M | implemented, kept |
+| 2 | Prompt-injection hardening + tests | medium (2) | low | S | implemented, kept |
+| 3 | Load the embedding model offline once cached | medium (2) | low | S | implemented, kept |
+| 4 | Eval regression check against a stored baseline | medium (2) | low | S | implemented, kept |
+| 5 | Architecture decision record (docs/ARCHITECTURE.md) | medium (2) | low | S | implemented, kept |
 | 6 | Lint (ruff) in CI | low-medium | low | S | not done |
 | 7 | Answer cache in the API | medium | low | M | not done |
 | 8 | More eval questions, incl. unanswerable (questions_extra.jsonl) | medium | low | M | not done |
@@ -140,3 +140,15 @@ The v1 baseline is saved in `docs/eval_baseline_v1.json`.
 - New `tests/test_compare_eval.py` (2 tests).
 - Current output: hit rate +8.0 pts, correctness +8.0 pts, refusals and citation validity
   unchanged. "OK: no metric got worse".
+
+### 5. Architecture decision record: KEPT
+
+- `docs/ARCHITECTURE.md`: 10 short ADRs (grounding, hybrid retrieval, embeddings, Chroma,
+  chunking, provider interface, model and rate limits, agent loop, prompt injection,
+  offline testing), each with context, decision, alternatives and trade-off.
+- Documentation only: tests and eval unchanged.
+
+### Not implemented
+
+Items 6 to 12 were not implemented (the brief allows at most 5). The next ones by rank would
+be ruff in CI and an answer cache in the API.
