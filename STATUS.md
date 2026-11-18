@@ -15,6 +15,19 @@ Overnight build log for SEC Filing Analyst. Newest state at the top of each sect
 | 7 | Docs | PASSED (README commands run: pytest, check-config, ingest, count, ask --ticker, agent, eval; pip dry-run of requirements) | 2026-11-18 |
 | 8 | Web app | PASSED (13 API tests; real server on 127.0.0.1: /health, /filings, /ask real Gemini, 422 check, page + assets served) | 2026-11-18 |
 
+## Final re-run of all checks (before the review phase)
+
+- M1: pytest exits cleanly; ci.yml and docker-compose.yml are valid YAML; `.env` is git-ignored. PASS
+- M2: 58 tests pass (fakes only). PASS
+- M3: AAPL 203, MSFT 276, NVDA 284, TSLA 343, AMZN 244 chunks (all > 100). PASS
+- M4: `ask "What are Apple's reportable segments?"` -> verified citation AAPL-2026-item1-003;
+  cafeteria-chef question -> "Not found in the filings". PASS
+- M5: real agent run (AMZN AWS growth + screener): both tools called, verified citation
+  AMZN-2025-item7-024; screener unreachable (ConnectionError). PASS
+- M6: `eval/run_eval.py` end to end: hit rate 72.0%, correctness 80.0%, citation validity 100%. PASS
+- M7: README / docs/EXPLAINED.md / STATUS.md exist; README commands were run in M7. PASS
+- M8: `scripts/smoke_server.py` (real LLM) and `--fake`: all endpoint checks passed. PASS
+
 ## Next step
 
 Final review: re-run all checks, tag v1-working, write docs/IMPROVEMENTS.md, implement the
