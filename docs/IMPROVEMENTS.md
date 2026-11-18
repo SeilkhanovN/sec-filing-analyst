@@ -131,3 +131,12 @@ The v1 baseline is saved in `docs/eval_baseline_v1.json`.
 - Before: 4 HTTP requests to huggingface.co on every server start (smoke-test log). After: 0.
 - New `tests/test_embedder_offline.py` (3 tests, using a fake sentence_transformers module).
 - Eval before/after: identical (same model files; 0 LLM calls).
+
+### 4. Eval regression check: KEPT
+
+- `scripts/compare_eval.py` compares `eval/results.json` with `docs/eval_baseline_v1.json`
+  (the v1 results, taken from the `v1-working` tag). It prints the deltas and exits 1 if any
+  metric dropped. It lives outside `eval/` so the committed eval files stay unchanged.
+- New `tests/test_compare_eval.py` (2 tests).
+- Current output: hit rate +8.0 pts, correctness +8.0 pts, refusals and citation validity
+  unchanged. "OK: no metric got worse".
