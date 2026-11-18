@@ -123,3 +123,11 @@ The v1 baseline is saved in `docs/eval_baseline_v1.json`.
   No real chunk contained a delimiter, so all 28 replies came from the cache (0 LLM calls).
 - Honest limit: if an injected sentence is in the filing and the model quotes it, the quote
   is "valid" (it exists). Verification proves provenance, not truth.
+
+### 3. Offline model loading: KEPT
+
+- If `data/hf_cache/hub/models--BAAI--bge-small-en-v1.5` exists, the embedder loads with
+  `local_files_only=True`. If that fails (incomplete cache), it falls back to a normal load.
+- Before: 4 HTTP requests to huggingface.co on every server start (smoke-test log). After: 0.
+- New `tests/test_embedder_offline.py` (3 tests, using a fake sentence_transformers module).
+- Eval before/after: identical (same model files; 0 LLM calls).

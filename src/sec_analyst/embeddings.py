@@ -30,7 +30,20 @@ class SentenceTransformerEmbedder:
 
         self.model_name = model_name
         self.batch_size = batch_size
-        self._model = SentenceTransformer(model_name, device="cpu")
+        # Once the model is cached, load it without contacting huggingface.co: faster start,
+        # works offline, and the exact cached files are used every time. If the cache turns
+        # out to be incomplete, fall back to a normal (online) load.
+        cache_home = Path(os.environ.get("HF_HOME", "")) if os.environ.get("HF_HOME") else None
+        cached = cache_home is not None and (cache_home / "hub" / f"models--{model_name.replace('/', '--')}").is_dir()
+        self.loaded_offline = False
+        if cached:
+            try:
+                self._model = SentenceTransformer(model_name, device="cpu", local_files_only=True)
+                self.loaded_offline = True
+            except Exception:  # noqa: BLE001 - incomplete cache: download what is missing
+                self._model = SentenceTransformer(model_name, device="cpu")
+        else:
+            self._model = SentenceTransformer(model_name, device="cpu")
         self._query_prefix = self.BGE_QUERY_PREFIX if "bge" in model_name.lower() else ""
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
