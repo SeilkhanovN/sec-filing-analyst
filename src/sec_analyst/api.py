@@ -101,7 +101,12 @@ def create_app(services: Services | None = None) -> FastAPI:
                 from .pipeline import build_retriever
 
                 settings = load_settings()
-                state["services"] = Services(settings, build_retriever(settings), make_llm_client(settings))
+                try:
+                    llm = make_llm_client(settings)  # LLM_PROVIDER=gemini (default) | ollama | fake
+                except LLMError as exc:  # e.g. a non-local OLLAMA_HOST, or a missing API key
+                    log.error("LLM provider %r is misconfigured: %s", settings.llm_provider, exc)
+                    raise HTTPException(status_code=503, detail="The language model is not configured correctly; see the server log.")
+                state["services"] = Services(settings, build_retriever(settings), llm)
             return state["services"]
 
     @app.exception_handler(Exception)

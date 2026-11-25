@@ -17,6 +17,8 @@ def _print_answer(answer, show_steps: bool = False) -> None:
         for s in answer.steps:
             if s["type"] == "tool":
                 print(f"  step {s['step']}: {s['tool']}({json.dumps(s['args'])}) -> {s['summary'][:160]}")
+            elif s["type"] == "error":
+                print(f"  step {s['step']}: FAILED STEP -> {s['summary'][:160]}")
             else:
                 print(f"  step {s['step']}: final answer")
     print("\nANSWER:\n" + answer.answer)
@@ -36,7 +38,10 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
     parser = argparse.ArgumentParser(prog="python -m sec_analyst.cli", description="SEC Filing Analyst")
-    parser.add_argument("--model", default=None, help="override LLM_MODEL for this command")
+    parser.add_argument("--provider", default=None, choices=["gemini", "ollama", "fake"],
+                        help="override LLM_PROVIDER for this command (default: gemini)")
+    parser.add_argument("--model", default=None,
+                        help="override the model of the active provider (LLM_MODEL or OLLAMA_MODEL)")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("check-config", help="show which settings are configured (never shows secrets)")
 
@@ -55,12 +60,15 @@ def main(argv: list[str] | None = None) -> int:
     p_agent.add_argument("--ticker", default=None)
     p_agent.add_argument("--max-steps", type=int, default=6)
 
-    sub.add_parser("list-models", help="list Gemini models that support generateContent (no generation call)")
+    sub.add_parser("list-models", help="list available models: Gemini models that support generateContent, "
+                                       "or the models installed in local Ollama (no generation call)")
 
     args = parser.parse_args(argv)
     settings = load_settings()
+    if args.provider:
+        settings.llm_provider = args.provider
     if args.model:
-        settings.llm_model = args.model
+        settings.set_model(args.model)
 
     if args.command == "check-config":
         print(json.dumps(settings.describe(), indent=2))
@@ -85,7 +93,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"total: {sum(counts.values())} chunks")
         return 0 if counts else 1
 
+    from .llm import LLMError, make_llm_client
+
     if args.command == "list-models":
+        if settings.llm_provider == "ollama":
+            try:
+                print("\n".join(make_llm_client(settings).list_models()))
+            except LLMError as exc:
+                print(f"ERROR: {exc}", file=sys.stderr)
+                return 2
+            return 0
         from google import genai
 
         client = genai.Client(api_key=settings.gemini_api_key)
@@ -94,11 +111,13 @@ def main(argv: list[str] | None = None) -> int:
                 print(m.name)
         return 0
 
-    from .llm import LLMError, make_llm_client
-
+    try:
+        llm = make_llm_client(settings)
+    except LLMError as exc:  # misconfiguration, e.g. a non-local OLLAMA_HOST or a missing key
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
     retriever = pipeline.build_retriever(settings)
-    llm = make_llm_client(settings)
-    print(f"[model: {llm.model}]")
+    print(f"[provider: {settings.llm_provider}, model: {llm.model}]")
     if args.command == "ask":
         from .rag import answer_question
 
