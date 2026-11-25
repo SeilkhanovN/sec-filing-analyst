@@ -4,9 +4,10 @@ The rest of the code only talks to `LLMClient.generate()` using the small neutra
 below (Message, ToolSpec, ToolCall, LLMResponse). Each provider translates them to its own
 SDK format. Implementations:
 
-- GeminiClient: real Google Gemini calls through the google-genai SDK.
+- GeminiClient: real Google Gemini calls through the google-genai SDK (the default).
+- OllamaClient: a privately hosted model through a local Ollama server (ollama_client.py).
 - FakeClient:   scripted responses for tests and offline demos (no network).
-- OpenAIClient: STUB ONLY. Marks where a second provider plugs in. Not implemented, not tested.
+- OpenAIClient: STUB ONLY. Not implemented, not tested.
 """
 
 from __future__ import annotations
@@ -56,10 +57,16 @@ class Message:
 
 @dataclass
 class LLMResponse:
+    """The model's turn. `tool_error` is set (and `tool_calls` left empty) when the model
+    tried to call a tool but the call failed validation (unknown tool, arguments that are
+    not a JSON object, missing required arguments). The agent then records a failed step
+    instead of crashing. Gemini never sets it: its SDK returns structured calls."""
+
     text: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     usage: dict[str, int] = field(default_factory=dict)
     raw: Any = None
+    tool_error: str | None = None
 
 
 class LLMError(RuntimeError):
@@ -344,6 +351,17 @@ def make_llm_client(settings) -> LLMClient:
         return FakeClient(echo_context_fake)
     if settings.llm_provider == "gemini":
         return GeminiClient(settings.gemini_api_key, settings.llm_model, thinking_level=settings.thinking_level)
+    if settings.llm_provider == "ollama":
+        from .ollama_client import OllamaClient
+
+        return OllamaClient(
+            settings.ollama_model,
+            host=settings.ollama_host,
+            timeout_s=settings.ollama_timeout_s,
+            num_ctx=settings.ollama_num_ctx,
+            tool_mode=settings.ollama_tool_mode,
+            allow_remote=settings.allow_remote_llm,
+        )
     if settings.llm_provider == "openai":
         return OpenAIClient()
     raise LLMError(f"Unknown LLM_PROVIDER: {settings.llm_provider!r}")

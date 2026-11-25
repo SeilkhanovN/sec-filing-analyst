@@ -120,3 +120,31 @@ def test_screener_tool_unreachable_or_unconfigured():
     unreachable = make_screener_tool("http://127.0.0.1:9", timeout_s=2).fn(ticker="AAPL")
     assert "unreachable" in unreachable["error"]
     assert "not configured" in make_screener_tool("").fn(ticker="AAPL")["error"]
+
+
+# ---- malformed tool calls (added with the Ollama provider) ------------------------------
+
+
+def test_malformed_tool_call_is_a_failed_step_and_the_agent_recovers(retriever, store):
+    script = [
+        LLMResponse(tool_error="arguments for search_filings are not valid JSON"),
+        LLMResponse(tool_calls=[ToolCall("search_filings", {"query": "Apple suppliers", "ticker": "AAPL"})]),
+        final("Apple relies on suppliers in Asia.",
+              [{"chunk_id": "AAPL-2025-item1a-000", "quote": "outsourcing partners located primarily in Asia"}]),
+    ]
+    agent, llm = make_agent(retriever, store, script)
+    answer = agent.run("Where does Apple manufacture?")
+    assert answer.found and answer.grounded
+    assert [s["type"] for s in answer.steps] == ["error", "tool", "answer"]
+    assert "not valid JSON" in answer.steps[0]["summary"]
+    feedback = llm.calls[1]["messages"][-1]
+    assert feedback.role == "user" and "not a valid tool call" in feedback.text
+
+
+def test_repeated_malformed_tool_calls_still_stop_at_max_steps():
+    broken = FakeClient(lambda *a: LLMResponse(tool_error="unknown tool 'x'"))
+    agent = Agent(broken, [Tool(ToolSpec("search_filings", "d", {}), lambda **kw: {"results": []})],
+                  chunk_lookup=lambda _: None, max_steps=3)
+    answer = agent.run("q")
+    assert len(broken.calls) == 3
+    assert not answer.found and answer.error == "max_steps reached"

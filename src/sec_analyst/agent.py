@@ -74,6 +74,18 @@ class Agent:
             for key in ("input_tokens", "output_tokens"):
                 usage[key] += response.usage.get(key, 0)
 
+            if response.tool_error:
+                # The model tried to call a tool but the call was malformed (only text-based
+                # tool calling can produce this). Record a failed step, tell the model what
+                # was wrong, and let it try again; the step still counts towards max_steps.
+                steps.append({"step": step, "type": "error", "summary": f"malformed tool call: {response.tool_error}"})
+                messages.append(Message(role="assistant", text=response.text))
+                messages.append(Message(role="user", text=(
+                    f"Your last reply was not a valid tool call ({response.tool_error}). Call one of "
+                    f"the tools ({', '.join(self.tools)}) with valid arguments, or give the final JSON answer."
+                )))
+                continue
+
             if not response.tool_calls:
                 seen_chunks = [c for c in map(self.chunk_lookup, seen_ids) if c is not None]
                 answer = answer_from_model_output(question, response.text, self.chunk_lookup, seen_chunks)
