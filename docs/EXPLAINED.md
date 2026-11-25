@@ -99,9 +99,13 @@ returning text or tool calls, using our own neutral `Message`, `ToolSpec`, `Tool
   exponential backoff plus jitter (capped attempts, never an endless loop), fails fast on a
   *daily* quota error, sets a low "thinking level", and keeps Gemini's raw reply object so
   the "thought signatures" Gemini 3 requires on multi-step tool use are sent back intact.
+- `OllamaClient` (`ollama_client.py`) talks to a model running on this computer through
+  Ollama's HTTP API (`POST /api/chat`). It only accepts a loopback host (127.0.0.1,
+  localhost, ::1) unless `ALLOW_REMOTE_LLM=1` is set, makes one attempt per call (no retry
+  loops), and turns "Ollama is not running", "model not installed" and "timed out" into
+  clear errors. `LLM_PROVIDER=ollama` selects it; Gemini stays the default.
 - `FakeClient` returns scripted replies; every unit test uses it.
-- `OpenAIClient` is a deliberately unimplemented stub that marks where a second provider
-  would go. It is not claimed to work.
+- `OpenAIClient` is a deliberately unimplemented stub. It is not claimed to work.
 
 ### 10. Agent (`agent.py`, `tools.py`)
 A loop: send the conversation and tool descriptions to the model; if it asks for tools, run
@@ -113,6 +117,14 @@ them and append the results; if it answers, stop. At most `max_steps` model call
   non-JSON bodies all come back as `{"error": ...}`, so the model can carry on.
 Tool failures never crash the loop: unknown tools, bad arguments and exceptions are turned
 into error results. The final answer uses the same JSON + citation verification as RAG.
+
+How the model asks for a tool depends on the provider, but the agent does not care: the
+client returns neutral `ToolCall` objects. Gemini uses its function-calling API. Ollama
+uses its native `tools` field when the model supports tools, and otherwise a strict JSON
+format (`{"tool_call": {"name": ..., "arguments": {...}}}`). Every Ollama tool call is
+validated (known tool, arguments a JSON object, required arguments present, no unknown
+ones). A malformed call becomes a **failed step**: it is recorded, the model is told what
+was wrong, and the step still counts towards `max_steps`.
 
 ### 11. Evaluation (`eval/`)
 `questions.jsonl` has 25 questions (5 per company) written from facts found in the
@@ -158,8 +170,8 @@ See the README: FastAPI with `/health`, `/filings` and `/ask`, and one static HT
 
 6. **How is the system provider-agnostic?**
    Everything depends on the `LLMClient.generate` interface and neutral message types. A new
-   provider is one class that translates those types. Only Gemini and a fake are
-   implemented; the OpenAI class is an explicit stub.
+   provider is one class that translates those types. Gemini and a local Ollama client
+   are implemented (plus a fake for tests); the OpenAI class is an explicit stub.
 
 7. **What did you learn from running against the real Gemini API?**
    Three things the docs did not make obvious: function results must be sent in a `user`
@@ -236,3 +248,57 @@ See the README: FastAPI with `/health`, `/filings` and `/ask`, and one static HT
     The smoke-test log showed four Hugging Face requests on every server start, even with
     the model cached. With `local_files_only=True` when the cache exists, startup is faster,
     works without internet (useful in containers) and always uses the same files.
+
+### Questions about the local model (v3)
+
+21. **Why add a local model at all?**
+    With Gemini, every question and the filing passages retrieved for it are sent to
+    Google. That is fine for public 10-Ks, but the same system pointed at confidential
+    documents (internal reports, client files, unpublished numbers) may not be allowed to
+    send them to a cloud API. A local model removes that problem and also the free-tier
+    quotas and outages (the 503 "high demand" errors seen during the build). The cost is
+    lower answer quality and slower answers on a laptop CPU (see question 24).
+
+22. **What stays on the machine, and what does not?**
+    With `LLM_PROVIDER=ollama`: the question, the retrieved passages, the prompts, the
+    model's replies and the verified answer all stay local. The embeddings and the Chroma
+    database were already local. Not local: `ingest` downloads the public filings from SEC
+    EDGAR, the embedding model is downloaded once from Hugging Face, and the agent's
+    optional screener tool sends a ticker symbol to `SCREENER_URL`. To make "local" a rule
+    rather than a hope, the client refuses any `OLLAMA_HOST` that is not a loopback address
+    (unless `ALLOW_REMOTE_LLM=1` is set on purpose) and ignores proxy environment variables.
+
+23. **How does the provider switch work, including tool calls?**
+    `make_llm_client(settings)` reads `LLM_PROVIDER` (`gemini` by default, or `ollama`) and
+    returns an object with the same `generate()` method. RAG, the agent, the API and the
+    eval only see that interface, so nothing else changed. Tool calls were the one place
+    where providers differ: Gemini has function calling; Ollama has native tool calling
+    for models that support it (llama3.2 does), and for other models the client describes
+    the tools in the prompt and asks for one strict JSON object. Either way the client
+    returns neutral `ToolCall` objects. Every call is validated, and a malformed call
+    becomes a failed agent step that counts towards the step limit.
+
+24. **How did the local model compare with Gemini?**
+    Same 28 questions, same retrieval and checks. `llama3.2:3b` on a laptop CPU:
+    correctness 76.0% (19/25) vs 88.0% (22/25), citation validity 86.4% (19/22) vs 100%
+    (25/25), unanswerable questions refused 3/3 for both, retrieval identical (80%). Speed:
+    33.8 s per question vs 9.1 s mean (1.3 s median) for Gemini. The extra mistakes were a
+    small model's mistakes: it picked the wrong one of two numbers in a sentence (share count
+    instead of dollars; owned headquarters space instead of the total), answered "72" where
+    the check expects "72 GPUs", and quoted a bare number instead of a sentence, which the
+    verifier rejected. The checks did their job: every bad citation was flagged, and the
+    model said "Not found" after every retrieval miss instead of guessing. In a real agent
+    run it also failed a two-part question that Gemini answered (it said "Not found" after
+    the screener tool failed). So: usable for private data, but a 3B model on a CPU is clearly
+    weaker. I would try a larger local model (7B to 14B) before relying on it.
+
+25. **How would you run this in production?**
+    Serve the model with a GPU inference server such as vLLM (continuous batching, an
+    OpenAI-compatible API) on machines inside a private network, and point a client at it
+    through the same interface. The localhost rule would become an allow-list of internal
+    hosts, plus TLS. Add access control (authentication in front of the API, per-user
+    rate limits, audit logs that do not store document text), a request queue with timeouts,
+    and monitoring: latency, tokens per second, error rate, GPU memory, and the share of
+    answers with verified citations or "not found", tracked over time. Run the evaluation on
+    every model or prompt change (the regression check already exists), and pin the model by
+    digest so an upgrade is a deliberate, evaluated change.

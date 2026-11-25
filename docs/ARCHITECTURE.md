@@ -55,8 +55,8 @@ Numbers refer to `eval/results.md` unless stated otherwise.
   `Message`, `ToolSpec`, `ToolCall` and `LLMResponse` types. Providers translate. Gemini's raw
   reply is kept opaque on assistant turns, so its "thought signatures" survive multi-step
   tool use.
-- **Implemented:** `GeminiClient` (real) and `FakeClient` (tests and offline demo).
-  `OpenAIClient` is a marked stub.
+- **Implemented:** `GeminiClient` (real, default), `OllamaClient` (real, local; see ADR-11)
+  and `FakeClient` (tests and offline demo). `OpenAIClient` is a marked stub.
 - **Trade-off:** provider-specific features (streaming, caching) are not exposed through the
   interface yet.
 
@@ -87,3 +87,48 @@ Numbers refer to `eval/results.md` unless stated otherwise.
 - **Decision:** all unit tests use fakes (LLM, embedder, store, HTTP screener server, and a fake
   sentence-transformers module). Real calls happen only in the eval and the manual checks.
 - **Why:** CI runs with no secrets and costs no quota. Tests are deterministic and take about 6 seconds.
+
+## ADR-11: Privately hosted LLM via Ollama
+- **Context:** with Gemini, every question and the filing passages retrieved for it are sent
+  to Google's API. That is acceptable for public 10-Ks, but not for confidential documents,
+  and the free tier added quotas and 503 "overloaded" errors. The goal was a mode in which
+  no data leaves the computer, without weakening any safety check.
+- **Decision:** `OllamaClient` implements the same `LLMClient.generate()` against a local
+  Ollama server (`POST /api/chat`, `stream=false`, temperature 0), using `requests`, which
+  the project already depended on. `LLM_PROVIDER=ollama` selects it, and Gemini stays the
+  default. Default model: `llama3.2:3b`, the model installed on the build machine.
+  - **Localhost only:** `OLLAMA_HOST` must be a loopback address as written (no DNS lookup:
+    `127.0.0.0/8`, `::1` or the name `localhost`). LAN addresses, `0.0.0.0`, other host names, URLs
+    with credentials and non-HTTP schemes are refused before any request is sent, unless
+    `ALLOW_REMOTE_LLM=1` is set (then a warning is logged). The HTTP session ignores proxy
+    environment variables, so "local" traffic cannot be rerouted.
+  - **Failure policy:** one attempt per call, no retries. Connect timeout 5 s, read timeout
+    `OLLAMA_TIMEOUT_S` (180 s). "Not running", "model not installed" and "timed out" each map
+    to a clear `LLMError`. A local server that is down will not recover by waiting, unlike a
+    cloud API under load.
+  - **Tool use:** native Ollama tool calling if `/api/show` lists the `tools` capability,
+    otherwise a strict JSON tool-call format (`{"tool_call": {...}}` with Ollama's JSON mode).
+    Every call is validated (known tool, object arguments, required arguments, no unknown
+    ones). A malformed call becomes `LLMResponse.tool_error`, which the agent records as a
+    failed step that counts towards `max_steps`.
+  - **Same checks:** the same prompts and JSON answer format, code-verified citations with
+    repair, the "Not found" refusal, delimiter neutralisation, and the agent's step limit.
+    Nothing is relaxed for the local model.
+- **Alternatives:** llama.cpp or vLLM directly (more setup; vLLM needs a GPU); the
+  `ollama` Python package (a new dependency for one HTTP call); an OpenAI-compatible
+  endpoint (Ollama offers one, but the native API reports token counts and capabilities).
+- **Trade-offs (measured, 28 questions, 2026-11-25):** quality is lower. Correctness was
+  76.0% vs 88.0%, and citation validity 86.4% (19/22) vs 100% (25/25). Refusals were 3/3 for
+  both. The small model gives very short answers (median 2 words) and sometimes quotes a
+  bare number instead of a sentence. Speed: 33.8 s per question on a laptop CPU (Intel Core
+  Ultra 5 125U, no discrete GPU) vs 9.1 s mean / 1.3 s median for Gemini. Hardware: the 3B
+  model at Q4 with an 8,192-token context uses 3.1 GB of RAM and 100% CPU. Context:
+  `OLLAMA_NUM_CTX=8192` covers the RAG prompts (1,453 to 2,614 tokens). Ollama silently
+  drops the oldest tokens beyond it, so the client logs a warning when a prompt reaches 95%
+  of the window.
+- **Not covered:** no GPU serving, batching or concurrency tuning (one Ollama process on one
+  machine); no multi-user setup (no authentication, quotas, queue or TLS; the API is for one
+  local user); no model monitoring (no latency or error dashboards, no drift or quality
+  tracking beyond running `eval/run_eval.py` by hand); no pinning of the model by digest
+  (a re-pulled tag can change); Docker + Ollama is not set up (a container cannot reach the
+  host's loopback, and `host.docker.internal` counts as remote).
